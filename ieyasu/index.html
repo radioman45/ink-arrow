@@ -256,8 +256,9 @@ window.IE = {
     const comp = ctx.createDynamicsCompressor();
     master = ctx.createGain(); master.gain.value = 0.9;
     master.connect(comp).connect(ctx.destination);
-    musicBus = ctx.createGain(); musicBus.gain.value = 0.55; musicBus.connect(master);
-    sfxBus = ctx.createGain(); sfxBus.gain.value = 0.8; sfxBus.connect(master);
+    musicBus = ctx.createGain(); musicBus.connect(master);
+    sfxBus = ctx.createGain(); sfxBus.connect(master);
+    applyVol();
     setInterval(tick, 50);
   }
 
@@ -363,7 +364,47 @@ window.IE = {
     }
   }
 
+  // ── 음량: 음악과 효과음을 따로 줄일 수 있다. 고른 값은 이 브라우저에 남는다.
+  const VOL_KEY = 'ink-audio-vol';
+  const vol = Object.assign({ music: 0.6, sfx: 0.8 }, (() => { try { return JSON.parse(localStorage.getItem(VOL_KEY)) || {}; } catch (e) { return {}; } })());
+  function applyVol() {
+    if (musicBus) { musicBus.gain.value = 0.55 * vol.music; sfxBus.gain.value = 0.8 * vol.sfx; }
+    try { localStorage.setItem(VOL_KEY, JSON.stringify(vol)); } catch (e) { /* 저장 못 해도 진행 */ }
+    const m = document.getElementById('volMusic'), f = document.getElementById('volSfx'), b = document.getElementById('volBtn');
+    if (m) { m.value = Math.round(vol.music * 100); f.value = Math.round(vol.sfx * 100); b.textContent = vol.music === 0 && vol.sfx === 0 ? '♪̸' : '♪'; }
+  }
+  function setVol(kind, v) { vol[kind] = Math.max(0, Math.min(1, v)); applyVol(); }
+  (function volumeWidget() {                              // 화면 왼쪽 위의 작은 ♪ 단추와 조절 막대
+    const st = document.createElement('style');
+    st.textContent = `#volBtn{position:fixed;left:max(18px,env(safe-area-inset-left));top:68px;z-index:60;width:32px;height:32px;border-radius:50%;
+      border:1.5px solid rgba(27,26,23,.55);background:rgba(233,223,200,.6);color:#1b1a17;font-size:17px;line-height:1;padding:0;cursor:pointer;touch-action:manipulation}
+      #volBox{position:fixed;left:max(18px,env(safe-area-inset-left));top:106px;z-index:60;display:none;padding:10px 14px;border:1.5px solid #1b1a17;border-radius:5px 8px 6px 9px;
+      background:rgba(244,236,214,.96);color:#1b1a17;font-size:14px;line-height:2;touch-action:auto}
+      #volBox label{display:flex;align-items:center;gap:10px;white-space:nowrap} #volBox input{width:150px;touch-action:auto;accent-color:#b3261e}
+      #volBox small{display:block;opacity:.65;font-size:12px;line-height:1.4;margin-top:4px}`;
+    document.head.appendChild(st);
+    const btn = document.createElement('button'); btn.id = 'volBtn'; btn.textContent = '♪'; btn.title = '소리 크기';
+    const box = document.createElement('div'); box.id = 'volBox';
+    box.innerHTML = `<label>음악 <input id="volMusic" type="range" min="0" max="100" step="5"></label>
+      <label>효과음 <input id="volSfx" type="range" min="0" max="100" step="5"></label><small>[ ] 키로 음악 줄이기·키우기 · M 전체 끄기</small>`;
+    const mount = () => {
+      document.body.append(btn, box); applyVol();
+      const stop = (e) => e.stopPropagation();
+      for (const el of [btn, box]) for (const ev of ['mousedown', 'touchstart', 'pointerdown', 'click', 'keydown']) el.addEventListener(ev, stop);
+      btn.addEventListener('click', () => { box.style.display = box.style.display === 'block' ? 'none' : 'block'; });
+      document.getElementById('volMusic').addEventListener('input', (e) => { init(); setVol('music', e.target.value / 100); });
+      document.getElementById('volSfx').addEventListener('input', (e) => { init(); setVol('sfx', e.target.value / 100); window.GAudio.sfx.hit(); });
+      addEventListener('keydown', (e) => {
+        if (e.code !== 'BracketLeft' && e.code !== 'BracketRight') return;
+        setVol('music', vol.music + (e.code === 'BracketRight' ? 0.1 : -0.1));
+        box.style.display = 'block'; clearTimeout(mount.t); mount.t = setTimeout(() => (box.style.display = 'none'), 1600);
+      });
+    };
+    document.body ? mount() : addEventListener('DOMContentLoaded', mount);
+  })();
+
   window.GAudio = {
+    setVol, vol,
     init,
     music(cfg) { Object.assign(M, { on: true, boss: false }, cfg); },
     boss(on) { M.boss = on; },
